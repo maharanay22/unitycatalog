@@ -69,7 +69,7 @@ public class ParquetExternalTableReadWriteTest extends ExternalTableReadWriteTes
   }
 
   @Test
-  public void testLoadTableKeepsColumnDefaultValue() throws Exception {
+  public void testLoadTableKeepsColumnDefaultAndVarcharMetadata() throws Exception {
     session = createSparkSessionWithCatalogs(CATALOG_NAME);
 
     String fullTableName =
@@ -102,6 +102,8 @@ public class ParquetExternalTableReadWriteTest extends ExternalTableReadWriteTes
     sql("INSERT INTO %s VALUES (1, 2, 'abc')", fullTableName);
     assertThatThrownBy(() -> sql("INSERT INTO %s VALUES (2, 2, 'abcd')", fullTableName))
         .hasStackTraceContaining("char/varchar type length limitation");
+    assertThat(sql("SELECT a, b, s FROM %s", fullTableName))
+        .containsExactly(RowFactory.create(1, 2, "abc"));
   }
 
   @Test
