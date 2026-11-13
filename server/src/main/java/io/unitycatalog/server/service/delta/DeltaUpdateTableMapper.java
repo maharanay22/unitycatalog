@@ -386,7 +386,7 @@ public final class DeltaUpdateTableMapper {
     CollectedUpdates c = collected.updates();
     boolean managed = TableType.MANAGED.toString().equals(dao.getType());
     if (managed) {
-      rejectSyntheticPropertyChanges(c);
+      rejectDerivedPropertyChanges(c);
     }
     boolean changesContractInput =
         managed
@@ -487,23 +487,23 @@ public final class DeltaUpdateTableMapper {
   }
 
   /**
-   * Rejects a MANAGED set-properties or remove-properties that names a synthetic key, before any
+   * Rejects a MANAGED set-properties or remove-properties that names a derived key, before any
    * update applies, because the server derives those keys itself.
    */
-  private static void rejectSyntheticPropertyChanges(CollectedUpdates c) {
+  private static void rejectDerivedPropertyChanges(CollectedUpdates c) {
     Set<String> setKeys =
         c.setProperties.map(DeltaSetPropertiesUpdate::getUpdates).map(Map::keySet).orElse(Set.of());
     List<String> removedKeys =
         c.removeProperties.map(DeltaRemovePropertiesUpdate::getRemovals).orElse(List.of());
-    Optional<String> synthetic =
+    Optional<String> derived =
         Stream.concat(setKeys.stream(), removedKeys.stream())
-            .filter(UcManagedDeltaContract::isSyntheticPropertyKey)
+            .filter(UcManagedDeltaContract::isDerivedPropertyKey)
             .findFirst();
-    if (synthetic.isPresent()) {
+    if (derived.isPresent()) {
       throw new BaseException(
           ErrorCode.INVALID_ARGUMENT,
           "MANAGED table property '"
-              + synthetic.get()
+              + derived.get()
               + "' is derived by the server and cannot be changed with set-properties or"
               + " remove-properties.");
     }

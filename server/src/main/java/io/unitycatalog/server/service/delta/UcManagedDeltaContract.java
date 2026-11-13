@@ -81,10 +81,10 @@ public final class UcManagedDeltaContract {
   /**
    * Property keys the server derives from the protocol, the domain metadata and its own commit
    * bookkeeping. Together with every {@code delta.feature.<name>} key (see {@link
-   * #isSyntheticPropertyKey}) they are the synthetic property keys of the managed Delta tables
-   * spec, which clients must not send in {@code set-properties} or {@code remove-properties}.
+   * #isDerivedPropertyKey}) they are the derived property keys of the managed Delta tables spec,
+   * which clients must not send in {@code set-properties} or {@code remove-properties}.
    */
-  private static final Set<String> SYNTHETIC_PROPERTY_KEYS =
+  private static final Set<String> DERIVED_PROPERTY_KEYS =
       Set.of(
           TableProperties.MIN_READER_VERSION,
           TableProperties.MIN_WRITER_VERSION,
@@ -94,13 +94,12 @@ public final class UcManagedDeltaContract {
           TableProperties.LAST_COMMIT_TIMESTAMP);
 
   /**
-   * True for a key in {@link #SYNTHETIC_PROPERTY_KEYS} or any {@code delta.feature.<name>} key,
+   * True for a key in {@link #DERIVED_PROPERTY_KEYS} or any {@code delta.feature.<name>} key,
    * whatever the feature name. Protocol and feature changes go through {@code set-protocol}.
    */
-  static boolean isSyntheticPropertyKey(String key) {
+  static boolean isDerivedPropertyKey(String key) {
     return key != null
-        && (SYNTHETIC_PROPERTY_KEYS.contains(key)
-            || key.startsWith(TableProperties.FEATURE_PREFIX));
+        && (DERIVED_PROPERTY_KEYS.contains(key) || key.startsWith(TableProperties.FEATURE_PREFIX));
   }
 
   /**

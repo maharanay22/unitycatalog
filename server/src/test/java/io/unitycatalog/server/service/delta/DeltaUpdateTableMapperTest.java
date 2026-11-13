@@ -434,9 +434,9 @@ public class DeltaUpdateTableMapperTest {
         .doesNotThrowAnyException();
   }
 
-  // ---------- synthetic and contract properties on MANAGED tables ----------
+  // ---------- derived and contract properties on MANAGED tables ----------
 
-  static Stream<String> syntheticPropertyKeys() {
+  static Stream<String> derivedPropertyKeys() {
     return Stream.of(
         "delta.minReaderVersion",
         "delta.minWriterVersion",
@@ -461,8 +461,8 @@ public class DeltaUpdateTableMapperTest {
   }
 
   @ParameterizedTest(name = "{0}")
-  @MethodSource("syntheticPropertyKeys")
-  public void settingOrRemovingSyntheticPropertyOfManagedTableIsRejected(String key) {
+  @MethodSource("derivedPropertyKeys")
+  public void settingOrRemovingDerivedPropertyOfManagedTableIsRejected(String key) {
     TableInfoDAO dao = managedDao();
     Map<String, String> stored = contractProperties(dao);
     MutablePropertyMap props = propsFrom(stored);
@@ -566,12 +566,12 @@ public class DeltaUpdateTableMapperTest {
   }
 
   @Test
-  public void syntheticAndContractPropertiesOfExternalTableCanBeChanged() {
+  public void derivedAndContractPropertiesOfExternalTableCanBeChanged() {
     TableInfoDAO dao = managedDao();
     dao.setType("EXTERNAL");
     MutablePropertyMap props = propsFrom(contractProperties(dao));
     List<String> removed =
-        Stream.concat(syntheticPropertyKeys(), contractPropertyKeys())
+        Stream.concat(derivedPropertyKeys(), contractPropertyKeys())
             .filter(k -> !k.equals(TableProperties.ENABLE_DELETION_VECTORS))
             .toList();
     DeltaUpdateTableMapper.applyUpdates(
