@@ -127,7 +127,8 @@ public class FunctionCli {
           "etc/data/function/python_engine.py",
           Arrays.stream(args.split(",")).map(String::trim).toArray(String[]::new));
     } catch (Exception e) {
-      throw new CliException("Failed to execute function " + functionFullName, e);
+      throw new CliException(
+          "Failed to execute function " + functionFullName + ": " + e.getMessage(), e);
     }
   }
 
