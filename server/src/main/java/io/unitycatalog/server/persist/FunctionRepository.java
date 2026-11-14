@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectReader;
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import io.unitycatalog.server.exception.BaseException;
 import io.unitycatalog.server.exception.ErrorCode;
 import io.unitycatalog.server.model.CreateFunction;
@@ -29,6 +30,8 @@ import java.util.TreeMap;
 import java.util.UUID;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
+import org.hibernate.exception.ConstraintViolationException;
+import org.hibernate.exception.DataException;
 import org.hibernate.query.Query;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +46,9 @@ public class FunctionRepository {
       JsonUtils.getInstance()
           .reader()
           .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .with(StreamReadFeature.STRICT_DUPLICATE_DETECTION);
+          .with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .without(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
 
   public FunctionRepository(Repositories repositories, SessionFactory sessionFactory) {
     this.repositories = repositories;
@@ -124,7 +129,9 @@ public class FunctionRepository {
                     p.setFunction(dao);
                   });
           session.persist(dao);
+          session.flush();
           PropertyDAO.from(properties, dao.getId(), Constants.FUNCTION).forEach(session::persist);
+          flushProperties(session);
           return functionInfo;
         },
         "Failed to create function",
@@ -265,11 +272,13 @@ public class FunctionRepository {
 
   /**
    * Parses the {@code properties} of a function create request: a single JSON object with unique
-   * keys and nothing after it. A value that is not a string is stored as its JSON text. An absent
-   * field, a blank string or a JSON {@code null} means no properties.
+   * keys and nothing after it. A value that is not a string is stored as its JSON text, with each
+   * number at its exact decimal value. An absent field, a blank string or a JSON {@code null} means
+   * no properties.
    *
-   * @throws BaseException with {@link ErrorCode#INVALID_ARGUMENT} for any other value, or for a key
-   *     longer than {@link PropertyDAO#MAX_KEY_LENGTH} characters
+   * @throws BaseException with {@link ErrorCode#INVALID_ARGUMENT} for any other value, for a key
+   *     longer than {@link PropertyDAO#MAX_KEY_LENGTH} characters, or for a NUL character in a key
+   *     or value, which PostgreSQL text cannot store
    */
   private static Map<String, String> parseProperties(String properties) {
     if (properties == null || properties.isBlank()) {
@@ -280,6 +289,10 @@ public class FunctionRepository {
       node = STRICT_JSON_READER.readTree(properties);
     } catch (JsonProcessingException e) {
       throw invalidProperties();
+    } catch (NumberFormatException e) {
+      throw new BaseException(
+          ErrorCode.INVALID_ARGUMENT,
+          "Function properties contain a number whose exponent is out of range.");
     }
     if (node.isNull()) {
       return Map.of();
@@ -289,7 +302,8 @@ public class FunctionRepository {
     }
     Map<String, String> parsed = new HashMap<>();
     for (Map.Entry<String, JsonNode> field : node.properties()) {
-      if (field.getKey().length() > PropertyDAO.MAX_KEY_LENGTH) {
+      String key = field.getKey();
+      if (key.codePointCount(0, key.length()) > PropertyDAO.MAX_KEY_LENGTH) {
         throw new BaseException(
             ErrorCode.INVALID_ARGUMENT,
             "Function property keys cannot be longer than "
@@ -297,9 +311,44 @@ public class FunctionRepository {
                 + " characters.");
       }
       JsonNode value = field.getValue();
-      parsed.put(field.getKey(), value.isTextual() ? value.textValue() : value.toString());
+      String text = value.isTextual() ? value.textValue() : value.toString();
+      if (key.indexOf('\0') >= 0 || text.indexOf('\0') >= 0) {
+        throw new BaseException(
+            ErrorCode.INVALID_ARGUMENT,
+            "Function property keys and values cannot contain the NUL character (\\u0000).");
+      }
+      parsed.put(key, text);
     }
     return parsed;
+  }
+
+  /**
+   * Writes the pending property rows, and turns a row the database rejects into {@link
+   * ErrorCode#INVALID_ARGUMENT}: keys its collation treats as equal (such as MySQL's default
+   * case-insensitive one), or a key over the column size where the database counts UTF-16 units
+   * (H2).
+   */
+  private static void flushProperties(Session session) {
+    try {
+      session.flush();
+    } catch (RuntimeException e) {
+      for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+        if (cause instanceof ConstraintViolationException) {
+          throw new BaseException(
+              ErrorCode.INVALID_ARGUMENT,
+              "Function property keys must be unique, and the database treats two of these keys"
+                  + " as the same key.",
+              e);
+        }
+        if (cause instanceof DataException) {
+          throw new BaseException(
+              ErrorCode.INVALID_ARGUMENT,
+              "The database cannot store a key or value of these function properties.",
+              e);
+        }
+      }
+      throw e;
+    }
   }
 
   private static BaseException invalidProperties() {

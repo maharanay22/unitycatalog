@@ -20,7 +20,10 @@ import io.unitycatalog.server.base.schema.SchemaOperations;
 import io.unitycatalog.server.exception.ErrorCode;
 import io.unitycatalog.server.sdk.catalog.SdkCatalogOperations;
 import io.unitycatalog.server.sdk.schema.SdkSchemaOperations;
+import io.unitycatalog.server.testdatabase.SupportedDatabase;
+import io.unitycatalog.server.utils.Constants;
 import io.unitycatalog.server.utils.TestUtils;
+import java.sql.Statement;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +33,8 @@ import org.hibernate.Session;
 import org.junit.jupiter.api.Test;
 
 public class SdkFunctionCRUDTest extends BaseFunctionCRUDTest {
+  private static final String EMOJI = "😀";
+
   @Override
   protected CatalogOperations createCatalogOperations(ServerConfig config) {
     return new SdkCatalogOperations(TestUtils.createApiClient(config));
@@ -78,6 +83,16 @@ public class SdkFunctionCRUDTest extends BaseFunctionCRUDTest {
     }
   }
 
+  private long countFunctionPropertyRows() {
+    try (Session session = hibernateConfigurator.getSessionFactory().openSession()) {
+      return session
+          .createSelectionQuery(
+              "SELECT count(*) FROM PropertyDAO WHERE entityType = :entityType", Long.class)
+          .setParameter("entityType", Constants.FUNCTION)
+          .getSingleResult();
+    }
+  }
+
   @Test
   public void testFunctionPropertiesRoundTrip() throws ApiException {
     createCommonResources();
@@ -99,6 +114,12 @@ public class SdkFunctionCRUDTest extends BaseFunctionCRUDTest {
         "{\"attempts\": 3, \"enabled\": true, \"unset\": null, \"nested\": {\"b\": [1, \"c\"]}}",
         "{\"attempts\":\"3\",\"enabled\":\"true\",\"nested\":\"{\\\"b\\\":[1,\\\"c\\\"]}\","
             + "\"unset\":\"null\"}"
+      },
+      {
+        "fn_decimal",
+        "{\"amount\": 0.1234567890123456789, \"big\": 1e400, \"price\": 1.50, \"list\": [2.0]}",
+        "{\"amount\":\"0.1234567890123456789\",\"big\":\"1E+400\",\"list\":\"[2.0]\","
+            + "\"price\":\"1.50\"}"
       },
       {"fn_max_key", "{\"" + maxLengthKey + "\":\"v\"}", "{\"" + maxLengthKey + "\":\"v\"}"},
       {"fn_absent", null, null},
@@ -142,12 +163,75 @@ public class SdkFunctionCRUDTest extends BaseFunctionCRUDTest {
           ErrorCode.INVALID_ARGUMENT,
           "Function properties must be a single JSON object with unique keys");
     }
+    for (String key : List.of("k".repeat(256), EMOJI.repeat(256))) {
+      assertApiException(
+          () -> createFunction("fn_invalid", "{\"" + key + "\":\"v\"}"),
+          ErrorCode.INVALID_ARGUMENT,
+          "Function property keys cannot be longer than 255 characters");
+    }
+    for (String properties : List.of("{\"a\\u0000b\":\"v\"}", "{\"k\":\"a\\u0000b\"}")) {
+      assertApiException(
+          () -> createFunction("fn_invalid", properties),
+          ErrorCode.INVALID_ARGUMENT,
+          "Function property keys and values cannot contain the NUL character");
+    }
     assertApiException(
-        () -> createFunction("fn_invalid", "{\"" + "k".repeat(256) + "\":\"v\"}"),
+        () -> createFunction("fn_invalid", "{\"n\":1e9999999999}"),
         ErrorCode.INVALID_ARGUMENT,
-        "Function property keys cannot be longer than 255 characters");
+        "Function properties contain a number whose exponent is out of range");
     assertThat(functionOperations.listFunctions(CATALOG_NAME, SCHEMA_NAME, Optional.empty()))
         .isEmpty();
+    assertThat(countFunctionPropertyRows()).isZero();
+  }
+
+  @Test
+  public void testPropertyKeyLengthCountsCharacters() throws ApiException {
+    createCommonResources();
+    String properties = "{\"" + EMOJI.repeat(255) + "\":\"v\"}";
+    switch (SupportedDatabase.selected()) {
+      case H2 ->
+          // H2 counts UTF-16 units, so 255 emoji are 510 units in a varchar(255).
+          assertApiException(
+              () -> createFunction("fn_max_key", properties),
+              ErrorCode.INVALID_ARGUMENT,
+              "The database cannot store a key or value of these function properties");
+      case POSTGRES_18, MYSQL_8 -> {
+        assertThat(createFunction("fn_max_key", properties).getProperties()).isEqualTo(properties);
+        assertThat(functionOperations.getFunction(CATALOG_NAME + "." + SCHEMA_NAME + ".fn_max_key"))
+            .extracting(FunctionInfo::getProperties)
+            .isEqualTo(properties);
+      }
+    }
+  }
+
+  @Test
+  public void testPropertyKeysTheDatabaseTreatsAsEqualRejected() throws ApiException {
+    createCommonResources();
+    String properties = "{\"Tier\":\"a\",\"tier\":\"b\"}";
+    switch (SupportedDatabase.selected()) {
+      case H2, POSTGRES_18 ->
+          assertThat(createFunction("fn_case", properties).getProperties()).isEqualTo(properties);
+      case MYSQL_8 -> {
+        // The test databases compare text exactly. MySQL's default collation ignores case.
+        try (Session session = hibernateConfigurator.getSessionFactory().openSession()) {
+          session.doWork(
+              connection -> {
+                try (Statement statement = connection.createStatement()) {
+                  statement.execute(
+                      "ALTER TABLE uc_properties MODIFY property_key varchar(255)"
+                          + " COLLATE utf8mb4_0900_ai_ci NOT NULL");
+                }
+              });
+        }
+        assertApiException(
+            () -> createFunction("fn_case", properties),
+            ErrorCode.INVALID_ARGUMENT,
+            "Function property keys must be unique, and the database treats two of these keys");
+        assertThat(functionOperations.listFunctions(CATALOG_NAME, SCHEMA_NAME, Optional.empty()))
+            .isEmpty();
+        assertThat(countFunctionPropertyRows()).isZero();
+      }
+    }
   }
 
   @Test
