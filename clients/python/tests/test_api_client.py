@@ -1,6 +1,12 @@
+import ast
 import asyncio
+import importlib
+import inspect
 import json
+import pkgutil
 
+import unitycatalog.client.delta.api as delta_api
+import unitycatalog.client.delta.models as delta_models
 from unitycatalog.client import ApiClient, CatalogsApi, Configuration
 from unitycatalog.client.delta.api import DeltaTablesApi
 from unitycatalog.client.delta.models.delta_commit import DeltaCommit
@@ -101,3 +107,23 @@ def test_api_client_deserializes_delta_responses_with_delta_models():
     assert [type(c) for c in table.commits] == [DeltaCommit]
     assert table.commits[0].to_dict() == commit
     assert table.metadata.columns.fields[0].type.to_dict() == "long"
+
+
+def _delta_api_response_types():
+    for module_info in pkgutil.iter_modules(delta_api.__path__):
+        module = importlib.import_module(f"{delta_api.__name__}.{module_info.name}")
+        for node in ast.walk(ast.parse(inspect.getsource(module))):
+            if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", None) == "_response_types_map":
+                yield from (value.value for value in node.value.values if value.value is not None)
+
+
+def test_every_delta_api_response_type_resolves_to_its_delta_model():
+    response_types = set(_delta_api_response_types())
+    assert "DeltaLoadTableResponse" in response_types
+    api_client = ApiClient(
+        Configuration(host="http://localhost:8080/api/2.1/unity-catalog")
+    )
+
+    resolved = {name: api_client._lookup_model(name) for name in response_types}
+
+    assert resolved == {name: getattr(delta_models, name) for name in response_types}

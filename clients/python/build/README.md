@@ -161,8 +161,12 @@ from unitycatalog.client import ApiClient, Configuration
 from unitycatalog.client.delta.api import DeltaTablesApi
 
 
-config = Configuration(host="http://localhost:8080/api/2.1/unity-catalog", access_token="<token>")
-api_client = ApiClient(config)
+token = "<token>"
+api_client = ApiClient(
+    Configuration(host="http://localhost:8080/api/2.1/unity-catalog"),
+    header_name="Authorization",
+    header_value=f"Bearer {token}",
+)
 delta_tables_api = DeltaTablesApi(api_client)
 
 table = await delta_tables_api.load_table(catalog="unity", var_schema="default", table="numbers")
@@ -170,9 +174,10 @@ for field in table.metadata.columns.fields:
     print(field.name, field.type.to_dict())
 ```
 
-`access_token` is only needed when the server has [authentication](https://docs.unitycatalog.io/server/auth/)
-enabled, where a local server writes its admin token to `etc/conf/token.txt`. Leave it out for the local
-unauthenticated server used in the examples above.
+The `Authorization` header is only needed when the server has
+[authentication](https://docs.unitycatalog.io/server/auth/) enabled, where a local server writes its admin token to
+`etc/conf/token.txt`. Leave out `header_name` and `header_value` for the local unauthenticated server used in the
+examples above. The token goes in a header because `Configuration(access_token=...)` does not send it.
 
 ## Feedback
 

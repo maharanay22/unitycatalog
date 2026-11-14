@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths, StandardCopyOption}
 import java.util.Comparator
 import scala.sys.process._
+import scala.jdk.CollectionConverters._
 import scala.util.{Try, Success, Failure}
 
 /**
@@ -109,10 +110,20 @@ object PythonClientPostBuild {
     patchDeltaDataTypeModule(log, baseDir, openApiOutputDir)
   }
 
+  private val unrelocatedDeltaImports = Seq(
+    """unitycatalog\.client\.models\b""".r,
+    """(?m)^\s*(from|import)\s+delta\.""".r
+  )
+
   /**
    * Points the imports in the generated unitycatalog.client.delta package at its own modules. The Python
    * generator writes the delta.yaml models into the configured modelPackage but always imports them from
-   * <packageName>.models, and the api/__init__.py imports from the bare apiPackage.
+   * <packageName>.models, and the api/__init__.py imports from the bare apiPackage. Also writes an empty
+   * unitycatalog/client/delta/__init__.py, which the generator does not emit, so delta is a regular package.
+   * Runs before patchDeltaDataTypeModule copies the serde module in. Fails the build if client/delta is
+   * missing, or if any module under it still refers to unitycatalog.client.models or imports the bare delta
+   * package after the rewrite, so a change in how the generator spells these imports breaks the build
+   * instead of leaving the Delta APIs on the UC models.
    */
   def relocateDeltaImports(
       log: Logger,
@@ -122,17 +133,24 @@ object PythonClientPostBuild {
     if (!Files.exists(deltaDir)) {
       sys.error(s"Delta package not found at $deltaDir")
     }
+    val rewrites = Seq(
+      "unitycatalog.client.models." -> "unitycatalog.client.delta.models.",
+      "from delta.api." -> "from unitycatalog.client.delta.api."
+    )
     val stream = Files.walk(deltaDir)
-    try {
-      stream.filter(_.toString.endsWith(".py")).forEach { file =>
-        val content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8)
-        val relocated = content
-          .replace("unitycatalog.client.models.", "unitycatalog.client.delta.models.")
-          .replace("from delta.api.", "from unitycatalog.client.delta.api.")
-        Files.write(file, relocated.getBytes(StandardCharsets.UTF_8))
-      }
-    } finally {
-      stream.close()
+    val files = try stream.iterator().asScala.filter(_.toString.endsWith(".py")).toList finally stream.close()
+    val leftovers = files.flatMap { file =>
+      val content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8)
+      val relocated = rewrites.foldLeft(content) { case (text, (from, to)) => text.replace(from, to) }
+      Files.write(file, relocated.getBytes(StandardCharsets.UTF_8))
+      unrelocatedDeltaImports.filter(_.findFirstIn(relocated).isDefined).map(pattern => s"$file matches $pattern")
+    }
+    if (leftovers.nonEmpty) {
+      sys.error(s"Delta imports were not relocated: ${leftovers.mkString("; ")}")
+    }
+    val packageInit = deltaDir.resolve("__init__.py")
+    if (!Files.exists(packageInit)) {
+      Files.write(packageInit, Array.emptyByteArray)
     }
     log.info(s"Relocated the imports under $deltaDir to unitycatalog.client.delta")
   }
