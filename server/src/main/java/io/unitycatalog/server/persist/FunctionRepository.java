@@ -131,11 +131,13 @@ public class FunctionRepository {
                     p.setFunction(dao);
                   });
           session.persist(dao);
-          // Write the function and its parameters first, so only property rows reach
-          // flushProperties and its mapping of database errors to property errors.
-          session.flush();
-          PropertyDAO.from(properties, dao.getId(), Constants.FUNCTION).forEach(session::persist);
-          flushProperties(session);
+          if (!properties.isEmpty()) {
+            // Write the function and its parameters first, so only property rows reach
+            // flushProperties and its mapping of database errors to property errors.
+            session.flush();
+            PropertyDAO.from(properties, dao.getId(), Constants.FUNCTION).forEach(session::persist);
+            flushProperties(session);
+          }
           return functionInfo;
         },
         "Failed to create function",
