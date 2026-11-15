@@ -123,6 +123,8 @@ public class FunctionCli {
     String args = json.getString(CliParams.INPUT_PARAMS.getServerParam());
     String functionFullName = json.getString(CliParams.FULL_NAME.getServerParam());
     try {
+      // Resolved from user.dir because CLI tests set it to the repo root while the forked
+      // JVM runs in examples/cli, and a JVM cannot change its own working directory.
       return PythonInvoker.invokePython(
           functionsApi.getFunction(functionFullName, /* includeBrowse= */ false),
           Paths.get(System.getProperty("user.dir"), "etc", "data", "function", "python_engine.py")
