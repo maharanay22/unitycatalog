@@ -380,6 +380,11 @@ extraProperties:
   my-config.property2: my-value2
 ```
 
+Each value must be a string, number or boolean, not a map or list. A key or value with a line break
+or another control character fails the render. Backslashes, and the characters that would end a
+key, are escaped, so the server reads each key and value as written. A `${...}` reference is still
+filled in from the environment when the server starts.
+
 Do not put secrets here: a secret in `server.properties` is deprecated.
 </td>
 		</tr>
@@ -617,6 +622,8 @@ not set
 </td>
 			<td>MySQL JDBC URL params
 
+Each value must be a string, number or boolean, not a map or list.
+
 Example:
 ```yaml
 extraParams:
@@ -631,7 +638,11 @@ extraParams:
 not set
 </pre>
 </td>
-			<td>MySQL database host (Required)</td>
+			<td>MySQL database host (Required)
+
+A host with `/`, `?`, `#`, `&`, `=`, a backslash, a space or a control character fails the render, and so
+does a port that is not a number.
+</td>
 		</tr>
 		<tr>
 			<td>server.db.mysqlConfig.passwordSecretKey</td>
@@ -730,6 +741,9 @@ not set
 			<td>PostgreSQL database host (Required)
 
 Example: `mydb.123456789012.us-east-1.rds.amazonaws.com`
+
+A host with `/`, `?`, `#`, `&`, `=`, a backslash, a space or a control character fails the render, and so
+does a port that is not a number.
 </td>
 		</tr>
 		<tr>

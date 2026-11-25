@@ -216,6 +216,57 @@ jobs:
           # Without parameters the URL has no ?.
           url="$(helm template uc helm -f helm/ci/postgresql-values.yaml | sed -n 's/^ *hibernate\.connection\.url=//p')"
           [ "$url" = 'jdbc:postgresql://postgresql:5432/ucdb' ]
+          # PgJDBC form-decodes the database name, so it is encoded and can't add a parameter such as sslmode.
+          out="$(helm template uc helm "${pg[@]}" --set-string 'server.db.postgresqlConfig.dbName=uc db?sslmode=disable')"
+          url="$(sed -n 's/^ *hibernate\.connection\.url=//p' <<<"$out")"
+          [ "$url" = 'jdbc:postgresql://postgresql:5432/uc+db%3Fsslmode%3Ddisable?sslmode=verify-full&sslrootcert=%2Fhome%2Funitycatalog%2Fetc%2Fconf%2Fdbrootca.crt' ]
+          # Every value written to an envsubst-ed properties file keeps a backslash and a leading space, and a key
+          # escapes the characters Properties.load would split it at. A ${...} reference is left for envsubst.
+          props_file="$(mktemp)"
+          printf 'server:\n  config:\n    extraProperties:\n      %s: %s\n      lead: %s\n      ref: ${OAUTH_CLIENT_SECRET}\n' \
+            '"a b=c:d#e!f\\g"' '"C:\\data"' '" x"' >"$props_file"
+          out="$(helm template uc helm -f "$props_file" --show-only templates/server/configmap.yaml)"
+          grep -qxF '    a\ b\=c\:d\#e\!f\\g=C:\\data' <<<"$out"
+          grep -qxF '    lead=\ x' <<<"$out"
+          grep -qxF '    ref=${OAUTH_CLIENT_SECRET}' <<<"$out"
+          user_file="$(mktemp)"
+          printf 'server:\n  db:\n    postgresqlConfig:\n      username: %s\n' '"dom\\user"' >"$user_file"
+          out="$(helm template uc helm -f helm/ci/postgresql-values.yaml -f "$user_file" --show-only templates/server/configmap.yaml)"
+          grep -qxF '    hibernate.connection.user=dom\\user' <<<"$out"
+          # A line break would end the entry and start another, so it fails the render, and so does a map or list
+          # where a value goes. A host that ends early or a port that isn't a number fails too.
+          bad_dir="$(mktemp -d)"
+          bad_values=(
+            'server:\n  db:\n    postgresqlConfig:\n      username: %s\n|"a\nhibernate.connection.url=x"|server.db.postgresqlConfig.username: a value cannot contain a line break'
+            'server:\n  config:\n    extraProperties:\n      k: %s\n|"a\nb"|server.config.extraProperties.k: a value cannot contain a line break'
+            'server:\n  config:\n    extraProperties:\n      %s: v\n|"a\nb"|a key cannot contain a line break'
+            'server:\n  config:\n    extraProperties:\n      k: %s\n|[a, b]|server.config.extraProperties.k: a value must be a string, number or boolean'
+            'storage:\n  modelStorageRoot: %s\n|"s3://b\nx=y"|storage.modelStorageRoot: a value cannot contain a line break'
+            'server:\n  db:\n    postgresqlConfig:\n      extraParams:\n        options: %s\n|{a: b}|server.db.postgresqlConfig.extraParams.options: a value must be a string, number or boolean'
+            'server:\n  db:\n    postgresqlConfig:\n      host: %s\n|"db/x"|server.db.postgresqlConfig.host: a host cannot contain'
+            'server:\n  db:\n    postgresqlConfig:\n      host: %s\n|"db?sslmode=disable"|server.db.postgresqlConfig.host: a host cannot contain'
+            'server:\n  db:\n    postgresqlConfig:\n      port: %s\n|"5432/x"|server.db.postgresqlConfig.port: a port must be a number'
+          )
+          for case in "${bad_values[@]}"; do
+            IFS='|' read -r format value message <<<"$case"
+            bad_file="$bad_dir/$RANDOM.yaml"
+            printf "$format" "$value" >"$bad_file"
+            if err="$(helm template uc helm -f helm/ci/postgresql-values.yaml -f "$bad_file" 2>&1)"; then
+              echo "expected the render to fail for $value"
+              exit 1
+            fi
+            grep -qF "$message" <<<"$err"
+          done
+          mysql_bad="$(mktemp)"
+          printf 'server:\n  db:\n    mysqlConfig:\n      host: %s\n      extraParams:\n        sslMode: [a]\n' '"mysql"' >"$mysql_bad"
+          if err="$(helm template uc helm -f helm/ci/mysql-values.yaml -f "$mysql_bad" 2>&1)"; then
+            exit 1
+          fi
+          grep -qF 'server.db.mysqlConfig.extraParams.sslMode: a value must be a string, number or boolean' <<<"$err"
+          if err="$(helm template uc helm -f helm/ci/mysql-values.yaml --set-string 'server.db.mysqlConfig.host=mysql:3306/x' 2>&1)"; then
+            exit 1
+          fi
+          grep -qF 'server.db.mysqlConfig.host: a host cannot contain' <<<"$err"
           # With storage secrets too, the server container has one env list that holds both. The upgrade-schema
           # container gets the database password and the driver, but no storage secrets.
           out="$(helm template uc helm -f helm/ci/mysql-values.yaml -f helm/ci/secrets-values.yaml \

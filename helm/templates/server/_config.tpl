@@ -6,39 +6,108 @@
 server.env=prod
 {{- if .Values.auth.enabled }}
 server.authorization=enable
-server.authorization-url={{ .Values.auth.authorizationUrl }}
-server.token-url={{ .Values.auth.tokenUrl }}
+server.authorization-url={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.authorizationUrl "path" "auth.authorizationUrl") }}
+server.token-url={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.tokenUrl "path" "auth.tokenUrl") }}
 server.client-id=${OAUTH_CLIENT_ID}
-server.redirect-port={{ .Values.auth.redirectPort }}
-server.cookie-timeout={{ .Values.auth.cookieTimeout }}
-server.access-token-timeout={{ .Values.auth.accessTokenTimeout }}
-server.allowed-issuers={{ .Values.auth.allowedIssuers }}
-server.allowed-jwks-uris={{ .Values.auth.allowedJwksUris }}
-server.audiences={{ .Values.auth.audiences }}
+server.redirect-port={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.redirectPort "path" "auth.redirectPort") }}
+server.cookie-timeout={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.cookieTimeout "path" "auth.cookieTimeout") }}
+server.access-token-timeout={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.accessTokenTimeout "path" "auth.accessTokenTimeout") }}
+server.allowed-issuers={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.allowedIssuers "path" "auth.allowedIssuers") }}
+server.allowed-jwks-uris={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.allowedJwksUris "path" "auth.allowedJwksUris") }}
+server.audiences={{ include "unitycatalog.properties.value" (dict "value" .Values.auth.audiences "path" "auth.audiences") }}
 {{- end }}
 
-storage-root.models={{ .Values.storage.modelStorageRoot }}
+storage-root.models={{ include "unitycatalog.properties.value" (dict "value" .Values.storage.modelStorageRoot "path" "storage.modelStorageRoot") }}
 
 {{- range $index, $config := .Values.storage.credentials.s3 }}
-s3.bucketPath.{{ $index }}={{ $config.bucketPath }}
-s3.region.{{ $index }}={{ $config.region }}
-s3.awsRoleArn.{{ $index }}={{ $config.awsRoleArn }}
+s3.bucketPath.{{ $index }}={{ include "unitycatalog.properties.value" (dict "value" $config.bucketPath "path" "storage.credentials.s3[].bucketPath") }}
+s3.region.{{ $index }}={{ include "unitycatalog.properties.value" (dict "value" $config.region "path" "storage.credentials.s3[].region") }}
+s3.awsRoleArn.{{ $index }}={{ include "unitycatalog.properties.value" (dict "value" $config.awsRoleArn "path" "storage.credentials.s3[].awsRoleArn") }}
 {{- end }}
 
 {{- range $index, $config := .Values.storage.credentials.adls }}
-adls.storageAccountName.{{ $index }}={{ $config.storageAccountName }}
+adls.storageAccountName.{{ $index }}={{ include "unitycatalog.properties.value" (dict "value" $config.storageAccountName "path" "storage.credentials.adls[].storageAccountName") }}
 {{- end }}
 
 {{- range $index, $config := .Values.storage.credentials.gcs }}
-gcs.bucketPath.{{ $index }}={{ $config.bucketPath }}
+gcs.bucketPath.{{ $index }}={{ include "unitycatalog.properties.value" (dict "value" $config.bucketPath "path" "storage.credentials.gcs[].bucketPath") }}
 gcs.jsonKeyFilePath.{{ $index }}=/etc/conf/gcs-credentials-{{ $index }}.json
 {{- end }}
 {{- end }}
 
 {{- range $k, $v := .Values.server.config.extraProperties }}
-{{ $k }}={{ $v }}
+{{ include "unitycatalog.properties.key" (dict "key" $k "path" (printf "server.config.extraProperties.%s" $k)) }}={{ include "unitycatalog.properties.value" (dict "value" $v "path" (printf "server.config.extraProperties.%s" $k)) }}
 {{- end }}
 
+{{- end }}
+
+{{/*
+A value in a properties file the init container runs envsubst on. Properties.load ends an entry at a
+line break and decodes backslash escapes, so a value with a control character fails the render, a
+backslash is doubled and a leading space is escaped. A $ reference is left for envsubst. `path`
+names the value in messages.
+*/}}
+{{- define "unitycatalog.properties.value" -}}
+{{- if or (kindIs "map" .value) (kindIs "slice" .value) }}
+{{- fail (printf "%s: a value must be a string, number or boolean, not a map or list" .path) }}
+{{- end }}
+{{- $value := "" }}
+{{- if not (kindIs "invalid" .value) }}
+{{- $value = toString .value }}
+{{- end }}
+{{- if regexMatch "[[:cntrl:]]" $value }}
+{{- fail (printf "%s: a value cannot contain a line break or another control character" .path) }}
+{{- end }}
+{{- $value = replace "\\" "\\\\" $value }}
+{{- if hasPrefix " " $value }}\{{ end }}{{ $value }}
+{{- end }}
+
+{{/*
+A key in a properties file. A key with a control character fails the render, and a backslash, =, :,
+a space, # and ! are escaped, as Properties.load reads them. `path` names the key in messages.
+*/}}
+{{- define "unitycatalog.properties.key" -}}
+{{- $key := toString .key }}
+{{- if regexMatch "[[:cntrl:]]" $key }}
+{{- fail (printf "%s: a key cannot contain a line break or another control character" .path) }}
+{{- end }}
+{{- regexReplaceAll "([\\\\=: #!])" $key "\\${1}" }}
+{{- end }}
+
+{{/*
+The host and port of a JDBC URL. A host with a character that ends it or starts another part of the
+URL fails the render, and so does a port that is not a number. `path` names the database settings.
+*/}}
+{{- define "unitycatalog.server.jdbcHostPort" -}}
+{{- $host := toString (.host | default "") }}
+{{- if regexMatch "[/?#&=\\\\[:space:][:cntrl:]]" $host }}
+{{- fail (printf "%s.host: a host cannot contain /, ?, #, &, =, a backslash, a space or a control character" .path) }}
+{{- end }}
+{{- $port := toString (.port | default "") }}
+{{- if not (regexMatch "^[0-9]+$" $port) }}
+{{- fail (printf "%s.port: a port must be a number, got %q" .path $port) }}
+{{- end }}
+{{- $host }}:{{ $port }}
+{{- end }}
+
+{{/*
+The query of a JDBC URL, ?name=value&..., or nothing without parameters. Values are form-encoded,
+and names too with `encodeNames`. A value must be a string, number or boolean. `path` names the
+parameters in messages.
+*/}}
+{{- define "unitycatalog.server.jdbcUrlQuery" -}}
+{{- $pairs := list }}
+{{- range $key, $value := .params }}
+{{- if or (kindIs "map" $value) (kindIs "slice" $value) }}
+{{- fail (printf "%s.%s: a value must be a string, number or boolean, not a map or list" $.path $key) }}
+{{- end }}
+{{- $name := $key }}
+{{- if $.encodeNames }}
+{{- $name = urlquery $key }}
+{{- end }}
+{{- $pairs = append $pairs (printf "%s=%s" $name (urlquery $value)) }}
+{{- end }}
+{{- if $pairs }}?{{ join "&" $pairs }}{{ end }}
 {{- end }}
 
 {{- define "unitycatalog.server.hibernateConfigTemplate" -}}
@@ -67,36 +136,17 @@ hibernate.connection.url=jdbc:h2:file:./etc/db/h2db;DB_CLOSE_ON_EXIT=FALSE;DB_CL
 {{- $_ := set $params $key $value }}
 {{- end }}
 
-{{- $urlParamsList := list }}
-{{- /* PgJDBC form-decodes the parameter values but not their names, so only the values are escaped. */}}
-{{- range $key, $value := $params }}
-{{- $urlParamsList = append $urlParamsList (printf "%s=%s" $key (urlquery $value)) }}
-{{- end }}
-
-{{- $urlParams := "" }}
-{{- if $urlParamsList }}
-{{- $urlParams = printf "?%s" ($urlParamsList | join "&") }}
-{{- end -}}
-
+{{- $pg := .Values.server.db.postgresqlConfig -}}
 hibernate.connection.driver_class=org.postgresql.Driver
-hibernate.connection.url=jdbc:postgresql://{{ .Values.server.db.postgresqlConfig.host }}:{{ .Values.server.db.postgresqlConfig.port }}/{{ .Values.server.db.postgresqlConfig.dbName }}{{ $urlParams }}
-hibernate.connection.user={{ .Values.server.db.postgresqlConfig.username }}
+{{- /* PgJDBC form-decodes the database name and the parameter values, but not the parameter names. */}}
+hibernate.connection.url=jdbc:postgresql://{{ include "unitycatalog.server.jdbcHostPort" (dict "host" $pg.host "port" $pg.port "path" "server.db.postgresqlConfig") }}/{{ urlquery $pg.dbName }}{{ include "unitycatalog.server.jdbcUrlQuery" (dict "params" $params "encodeNames" false "path" "server.db.postgresqlConfig.extraParams") }}
+hibernate.connection.user={{ include "unitycatalog.properties.value" (dict "value" $pg.username "path" "server.db.postgresqlConfig.username") }}
 {{- else if eq .Values.server.db.type "mysql" -}}
-
-{{- $urlParamsList := list }}
-{{- range $key, $value := .Values.server.db.mysqlConfig.extraParams }}
-{{- $urlParamsList = append $urlParamsList (printf "%s=%s" (urlquery $key) (urlquery $value)) }}
-{{- end }}
-
-{{- $urlParams := "" }}
-{{- if $urlParamsList }}
-{{- $urlParams = printf "?%s" ($urlParamsList | join "&") }}
-{{- end -}}
-
+{{- $my := .Values.server.db.mysqlConfig -}}
 hibernate.connection.driver_class=com.mysql.cj.jdbc.Driver
 {{- /* Connector/J form-decodes the whole URL, the database name too, so urlquery is the right escape for it. */}}
-hibernate.connection.url=jdbc:mysql://{{ required "server.db.mysqlConfig.host is required" .Values.server.db.mysqlConfig.host }}:{{ .Values.server.db.mysqlConfig.port }}/{{ urlquery .Values.server.db.mysqlConfig.dbName }}{{ $urlParams }}
-hibernate.connection.user={{ .Values.server.db.mysqlConfig.username }}
+hibernate.connection.url=jdbc:mysql://{{ include "unitycatalog.server.jdbcHostPort" (dict "host" (required "server.db.mysqlConfig.host is required" $my.host) "port" $my.port "path" "server.db.mysqlConfig") }}/{{ urlquery $my.dbName }}{{ include "unitycatalog.server.jdbcUrlQuery" (dict "params" $my.extraParams "encodeNames" true "path" "server.db.mysqlConfig.extraParams") }}
+hibernate.connection.user={{ include "unitycatalog.properties.value" (dict "value" $my.username "path" "server.db.mysqlConfig.username") }}
 {{- else }}
 {{ fail "Unsupported database type. Supported types are: file, postgresql, mysql." }}
 {{- end }}
