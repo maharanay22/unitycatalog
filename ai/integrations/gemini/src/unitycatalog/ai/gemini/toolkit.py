@@ -125,7 +125,7 @@ def _restore_integers(value: Any, uc_type_json: Union[str, Dict[str, Any]]) -> A
 
 class GeminiTool(BaseModel):
     """
-    Model representing an Autogen tool.
+    Model representing a Gemini tool.
     """
 
     fn: Callable = Field(
@@ -133,7 +133,7 @@ class GeminiTool(BaseModel):
     )
 
     name: str = Field(
-        description="The name of the function.",
+        description="The tool name of the function, such as catalog__schema__function.",
     )
     description: str = Field(
         description="A brief description of the function's purpose.",
