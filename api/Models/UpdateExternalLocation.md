@@ -3,7 +3,7 @@
 
 | Name | Type | Description | Notes |
 |------------ | ------------- | ------------- | -------------|
-| **url** | **String** | Path URL of the external location. | [optional] [default to null] |
+| **url** | **String** | Path URL of the external location. It can be at most 255 characters, or the request fails with INVALID_ARGUMENT. See Storage location limits in the server configuration docs for the cloud storage limits that also apply.  | [optional] [default to null] |
 | **credential\_name** | **String** | Name of the storage credential used with this location. Setting it on an external location whose credential was force-deleted repairs the location. | [optional] [default to null] |
 | **comment** | **String** | User-provided free-form text description. | [optional] [default to null] |
 | **owner** | **String** | Username of the new owner. The user must already exist. | [optional] [default to null] |

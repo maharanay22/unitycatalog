@@ -9,7 +9,7 @@
 | **table\_type** | [**TableType**](TableType.md) |  | [default to null] |
 | **data\_source\_format** | [**DataSourceFormat**](DataSourceFormat.md) |  | [optional] [default to null] |
 | **columns** | [**List**](ColumnInfo.md) | The array of __ColumnInfo__ definitions of the table&#39;s columns. | [default to null] |
-| **storage\_location** | **String** | Storage root URL for external table | [optional] [default to null] |
+| **storage\_location** | **String** | Storage root URL for external table. It can be at most 2048 characters, or the request fails with INVALID_ARGUMENT. See Storage location limits in the server configuration docs for the cloud storage limits that also apply.  | [optional] [default to null] |
 | **comment** | **String** | User-provided free-form text description. | [optional] [default to null] |
 | **properties** | **Map** | A map of key-value properties attached to the securable. | [optional] [default to null] |
 | **view\_definition** | **String** | Definition text for view-like table types such as VIEW, MATERIALIZED_VIEW, STREAMING_TABLE, and METRIC_VIEW. The format depends on the table type (SQL for views, YAML for metric views). | [optional] [default to null] |

@@ -1669,7 +1669,10 @@ components:
           description: The comment attached to the volume
         storage_location:
           type: string
-          description: The storage location of the volume
+          description: |
+            The storage location of the volume. It can be at most 2048 characters, or the request fails with
+            INVALID_ARGUMENT. See Storage location limits in the server configuration docs for the cloud
+            storage limits that also apply.
       required:
         - catalog_name
         - schema_name
@@ -1918,7 +1921,10 @@ components:
           items:
             $ref: '#/components/schemas/ColumnInfo'
         storage_location:
-          description: Storage root URL for external table
+          description: |
+            Storage root URL for external table. It can be at most 2048 characters, or the request fails with
+            INVALID_ARGUMENT. See Storage location limits in the server configuration docs for the cloud
+            storage limits that also apply.
           type: string
         comment:
           description: User-provided free-form text description.
@@ -2057,6 +2063,11 @@ components:
             Storage root URL for managed storage location of schema. If not set, managed securables
             under this schema will try to use the storage_location of the parent catalog instead.
             Example: s3://bucket/ucroot
+            The server stores managed tables and volumes under
+            {storage_root}/__unitystorage/schemas/{schema_id}, and those locations must fit in 2048 bytes
+            in UTF-8. So the normalized root can be at most 1943 bytes in UTF-8 (1943 ASCII characters),
+            or the request fails with INVALID_ARGUMENT. See Storage location limits in the server
+            configuration docs for the cloud storage limits that also apply.
           type: string
       required:
         - name
@@ -2147,6 +2158,11 @@ components:
         storage_root:
           description: |
             Storage root URL for managed storage location of catalog. Example: s3://bucket/ucroot
+            The server stores managed tables and volumes under
+            {storage_root}/__unitystorage/catalogs/{catalog_id}, and those locations must fit in 2048 bytes
+            in UTF-8. So the normalized root can be at most 1942 bytes in UTF-8 (1942 ASCII characters),
+            or the request fails with INVALID_ARGUMENT. See Storage location limits in the server
+            configuration docs for the cloud storage limits that also apply.
           type: string
       required:
         - name
@@ -2784,7 +2800,9 @@ components:
           description: Name of parent schema relative to its parent catalog.
           type: string
         source:
-          description: URI indicating the location of the source model artifacts.
+          description: |
+            URI indicating the location of the source model artifacts. It can be at most 2048 characters,
+            or the request fails with INVALID_ARGUMENT.
           type: string
         run_id:
           description: The run id used by the ML package that generated the model.
@@ -3261,7 +3279,10 @@ components:
           description: Name of the external location.
           type: string
         url:
-          description: Path URL of the external location.
+          description: |
+            Path URL of the external location. It can be at most 255 characters, or the request fails with
+            INVALID_ARGUMENT. See Storage location limits in the server configuration docs for the cloud
+            storage limits that also apply.
           type: string
         credential_name:
           description: Name of the storage credential used with this location.
@@ -3273,7 +3294,10 @@ components:
       type: object
       properties:
         url:
-          description: Path URL of the external location.
+          description: |
+            Path URL of the external location. It can be at most 255 characters, or the request fails with
+            INVALID_ARGUMENT. See Storage location limits in the server configuration docs for the cloud
+            storage limits that also apply.
           type: string
         credential_name:
           description: Name of the storage credential used with this location. Setting it on an external location whose credential was force-deleted repairs the location.
