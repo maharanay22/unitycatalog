@@ -64,6 +64,10 @@ hibernate.connection.url=jdbc:h2:file:./etc/db/h2db;DB_CLOSE_ON_EXIT=FALSE;DB_CL
 {{- if hasKey $params $key }}
 {{- fail (printf "server.db.postgresqlConfig.extraParams.%s is set by server.db.postgresqlConfig.ssl: remove it from extraParams" $key) }}
 {{- end }}
+{{- /* PgJDBC reads dbname, host and port in any case as PGDBNAME, PGHOST and PGPORT, which override the URL's target. */}}
+{{- if or (has (upper $key) (list "DBNAME" "HOST" "PORT")) (has $key (list "PGDBNAME" "PGHOST" "PGPORT")) }}
+{{- fail (printf "server.db.postgresqlConfig.extraParams.%s would override the database the chart connects to: remove it from extraParams and set server.db.postgresqlConfig.host, port or dbName instead" $key) }}
+{{- end }}
 {{- $_ := set $params $key $value }}
 {{- end }}
 

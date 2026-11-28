@@ -208,6 +208,21 @@ jobs:
               grep -qF 'a parameter name cannot contain &, =, $, a backslash or a control character' <<<"$err"
             done
           done
+          # A parameter that names the connection target would override host, port or dbName, for the server and the
+          # schema upgrade alike, so it fails the render, with ssl or without.
+          for ssl_args in "${pg[*]}" "-f helm/ci/postgresql-values.yaml"; do
+            for key in dbname DBName host Port PGDBNAME PGHOST PGPORT; do
+              if err="$(helm template uc helm $ssl_args --set-string "server.db.postgresqlConfig.extraParams.${key}=other" 2>&1)"; then
+                echo "expected the render to fail for $ssl_args extraParams.${key}"
+                exit 1
+              fi
+              grep -qF "server.db.postgresqlConfig.extraParams.${key} would override the database the chart connects to" <<<"$err"
+            done
+          done
+          # PgJDBC reads only the upper case PG names, so pgdbname is an ordinary parameter.
+          url="$(helm template uc helm -f helm/ci/postgresql-values.yaml \
+            --set-string server.db.postgresqlConfig.extraParams.pgdbname=x | sed -n 's/^ *hibernate\.connection\.url=//p')"
+          [ "$url" = 'jdbc:postgresql://postgresql:5432/ucdb?pgdbname=x' ]
           out="$(helm template uc helm -f helm/ci/postgresql-values.yaml \
             --set-string server.db.postgresqlConfig.extraParams.sslmode=require \
             --set-string server.db.postgresqlConfig.extraParams.sslrootcert=/certs/ca.crt)"

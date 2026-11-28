@@ -708,7 +708,8 @@ not set
 
 With `ssl.enabled`, the chart sets `sslmode` and `sslrootcert`, and the render fails when a parameter here
 repeats one of them. A name with `&`, `=`, `$`, a backslash or a control character also fails the render, since
-it could add a parameter of its own.
+it could add a parameter of its own. So does `dbname`, `host` or `port` in any case, or `PGDBNAME`, `PGHOST`
+or `PGPORT`, since the driver would connect to it instead of `host`, `port` and `dbName`.
 Each value must be a string, number or boolean, not a map or list. Quote numbers, for
 example `socketTimeout: "1000000"`, or pass them with `--set-string`, since Helm reads an unquoted number
 from a values file as a float and renders 1000000 as `1e+06`.
